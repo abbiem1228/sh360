@@ -24,7 +24,7 @@ router.post('/login', (req, res) => {
 });
 
 router.get('/logout', (req, res) => {
-  
+  res.clearCookie('adminAuth');
   res.redirect('/admin/login');
 });
 
