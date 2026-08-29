@@ -82,8 +82,9 @@ router.get('/view/:reportId', async (req, res) => {
 
 function buildScoreData(responses, raters, sections) {
   // Map rater id -> group
+  const norm = g => { if(!g) return null; const m={'self':'self','supervisor':'supervisor','peer':'peer','peers':'peer','direct_report':'direct_report','direct_reports':'direct_report','skip_level':'skip_level','skip_levels':'skip_level'}; return m[g.toLowerCase().trim().replace(/\s+/g,'_')] || g; };
   const raterGroups = {};
-  raters.forEach(r => { raterGroups[r.id] = r.rater_group; });
+  raters.forEach(r => { raterGroups[r.id] = norm(r.rater_group); });
 
   const groups = ['self','supervisor','peer','direct_report','skip_level'];
 
@@ -237,9 +238,12 @@ Be direct, specific, and grounded in the actual data. Do not be generic. Referen
   });
 
   try {
-    return JSON.parse(response.content[0].text);
-  } catch {
-    return { overview: response.content[0].text, sections: {}, keyPattern: '' };
+    let text = response.content[0].text.trim();
+    text = text.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/\s*```$/,'');
+    return JSON.parse(text);
+  } catch(e) {
+    console.error('parse error:', e.message);
+    return { overview: '', sections: {}, keyPattern: '' };
   }
 }
 
