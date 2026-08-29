@@ -17,7 +17,7 @@ router.get('/login', (req, res) => {
 
 router.post('/login', (req, res) => {
   if (req.body.password === process.env.ADMIN_PASSWORD) {
-    req.isAdmin = true;
+    res.cookie('adminAuth', 'yes', { signed:true, httpOnly:true, sameSite:'lax', secure:process.env.NODE_ENV==='production', maxAge:28800000 });
     return res.redirect('/admin');
   }
   res.redirect('/admin/login?error=1');
