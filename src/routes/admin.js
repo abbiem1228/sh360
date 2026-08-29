@@ -6,7 +6,7 @@ const { sendRaterInvite } = require('../email');
 
 // ── Auth middleware ───────────────────────────────────────────
 function requireAuth(req, res, next) {
-  if (req.session.adminAuth) return next();
+  if (req.isAdmin) return next();
   res.redirect('/admin/login');
 }
 
@@ -17,14 +17,14 @@ router.get('/login', (req, res) => {
 
 router.post('/login', (req, res) => {
   if (req.body.password === process.env.ADMIN_PASSWORD) {
-    req.session.adminAuth = true;
+    req.isAdmin = true;
     return res.redirect('/admin');
   }
   res.redirect('/admin/login?error=1');
 });
 
 router.get('/logout', (req, res) => {
-  req.session.destroy();
+  
   res.redirect('/admin/login');
 });
 
