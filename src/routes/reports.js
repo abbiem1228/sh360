@@ -8,7 +8,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Auth middleware (same simple check)
 function requireAuth(req, res, next) {
-  if (req.isAdmin) return next();
+  if (req.session.adminAuth) return next();
   res.redirect('/admin/login');
 }
 
@@ -101,9 +101,12 @@ function buildScoreData(responses, raters, sections) {
 
   responses.forEach(r => {
     const group = raterGroups[r.rater_id];
-    if (!group) return;
+    if (!group || !groups.includes(group)) return;
     const section = sections.find(s => s.questions.some(q => q.n === r.question_number));
     if (!section) return;
+    if (!sectionScores[section.id]) return;
+    if (!sectionScores[section.id][group]) sectionScores[section.id][group] = [];
+    if (!overallScores[group]) overallScores[group] = [];
     sectionScores[section.id][group].push(r.score);
     overallScores[group].push(r.score);
   });
