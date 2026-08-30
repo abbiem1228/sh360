@@ -17,7 +17,13 @@ router.get('/login', (req, res) => {
 
 router.post('/login', (req, res) => {
   if (req.body.password === process.env.ADMIN_PASSWORD) {
-    res.cookie('adminAuth', 'yes', { signed:true, httpOnly:true, sameSite:'lax', secure:process.env.NODE_ENV==='production', maxAge:28800000 });
+    res.cookie('adminAuth', 'yes', {
+      signed: true,
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 8 * 60 * 60 * 1000
+    });
     return res.redirect('/admin');
   }
   res.redirect('/admin/login?error=1');
@@ -104,27 +110,22 @@ router.post('/leaders/:leaderId/raters', requireAuth, async (req, res) => {
   const { leaderId } = req.params;
   const { data: leader } = await supabase.from('leaders').select('cycle_id').eq('id', leaderId).single();
 
-  // Support bulk add — one rater per line (name, email, group)
-  const lines = (req.body.raters_text || '').trim().split('\n').filter(l => l.trim());
-  const rows = [];
+  // Handle array of name/email/group fields from the new form
+  const names  = [].concat(req.body.name  || []);
+  const emails = [].concat(req.body.email || []);
+  const groups = [].concat(req.body.rater_group || []);
 
-  for (const line of lines) {
-    const parts = line.split(',').map(p => p.trim());
-    if (parts.length >= 3) {
-      rows.push({
-        leader_id:   leaderId,
-        name:        parts[0],
-        email:       parts[1],
-        rater_group: parts[2],
-        token:       nanoid(24)
-      });
+  const rows = [];
+  for (let i = 0; i < names.length; i++) {
+    const name  = (names[i]  || '').trim();
+    const email = (emails[i] || '').trim();
+    const group = (groups[i] || '').trim();
+    if (name && email && group) {
+      rows.push({ leader_id: leaderId, name, email, rater_group: group, token: nanoid(24) });
     }
   }
 
-  if (rows.length) {
-    await supabase.from('raters').insert(rows);
-  }
-
+  if (rows.length) await supabase.from('raters').insert(rows);
   res.redirect(`/admin/cycles/${leader.cycle_id}`);
 });
 
@@ -192,187 +193,388 @@ router.post('/raters/:raterId/delete', requireAuth, async (req, res) => {
 
 const CSS = `
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:#F2F6FA;color:#1a1a1a;font-size:14px}
-a{color:#2E75B6;text-decoration:none}a:hover{text-decoration:underline}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* Admin shell */
-.admin-nav{background:#1F3864;padding:0 32px;display:flex;align-items:center;gap:32px;height:52px}
-.nav-brand{color:#fff;font-weight:bold;font-size:15px;letter-spacing:0.5px}
-.nav-link{color:#9FB5CC;font-size:13px;transition:color 0.2s}
-.nav-link:hover{color:#fff;text-decoration:none}
-.nav-spacer{flex:1}
-.admin-main{max-width:1100px;margin:0 auto;padding:32px 24px}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* Cards */
-.card{background:#fff;border-radius:6px;padding:24px;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,0.08)}
-.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-.card-title{font-size:16px;font-weight:bold;color:#1F3864}
+:root {
+  --navy:  #1F3864;
+  --blue:  #2E75B6;
+  --light: #DCE6F1;
+  --pale:  #F2F6FA;
+  --green: #1F6B3A;
+  --red:   #A94442;
+  --amber: #B06000;
+  --grey:  #595959;
+  --lgrey: #E8EFF7;
+  --white: #ffffff;
+  --shadow: 0 1px 4px rgba(31,56,100,0.10);
+  --shadow-md: 0 4px 16px rgba(31,56,100,0.12);
+}
 
-/* Buttons */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:4px;font-size:13px;font-weight:bold;cursor:pointer;border:none;transition:opacity 0.15s}
-.btn:hover{opacity:0.88;text-decoration:none}
-.btn-primary{background:#2E75B6;color:#fff}
-.btn-navy{background:#1F3864;color:#fff}
-.btn-green{background:#1F6B3A;color:#fff}
-.btn-red{background:#A94442;color:#fff}
-.btn-outline{background:transparent;color:#2E75B6;border:1px solid #2E75B6}
-.btn-sm{padding:5px 11px;font-size:12px}
+body { font-family: 'Inter', Arial, sans-serif; background: #EEF3F9; color: #1a2030; font-size: 14px; }
+a { color: var(--blue); text-decoration: none; } a:hover { text-decoration: underline; }
 
-/* Tables */
-.data-table{width:100%;border-collapse:collapse}
-.data-table th{background:#1F3864;color:#fff;padding:10px 14px;text-align:left;font-size:12px;letter-spacing:0.5px;text-transform:uppercase}
-.data-table td{padding:10px 14px;border-bottom:1px solid #eee;font-size:13px}
-.data-table tr:last-child td{border-bottom:none}
-.data-table tr:hover td{background:#F7F9FC}
+/* ── Nav ─────────────────────────────────────── */
+.admin-nav {
+  background: var(--navy);
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  gap: 28px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  position: sticky; top: 0; z-index: 100;
+}
+.nav-logo { display: flex; align-items: center; gap: 10px; }
+.nav-logo-mark {
+  width: 30px; height: 30px;
+  background: var(--blue);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: white; font-size: 13px; letter-spacing: -0.5px;
+}
+.nav-brand { color: white; font-weight: 600; font-size: 15px; }
+.nav-link { color: rgba(255,255,255,0.65); font-size: 13px; font-weight: 500; transition: color 0.15s; }
+.nav-link:hover { color: white; text-decoration: none; }
+.nav-spacer { flex: 1; }
+.nav-user {
+  display: flex; align-items: center; gap: 8px;
+  color: rgba(255,255,255,0.65); font-size: 13px;
+}
+.nav-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--blue); color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+}
 
-/* Status badges */
-.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.5px}
-.badge-draft{background:#E8E8E8;color:#595959}
-.badge-active{background:#D4EDDA;color:#155724}
-.badge-closed{background:#F8D7DA;color:#721C24}
-.badge-complete{background:#D4EDDA;color:#155724}
-.badge-pending{background:#FFF3CD;color:#856404}
+/* ── Main ────────────────────────────────────── */
+.admin-main { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
 
-/* Progress bar */
-.progress-bar{height:6px;background:#E8E8E8;border-radius:3px;overflow:hidden}
-.progress-fill{height:100%;background:#2E75B6;border-radius:3px;transition:width 0.3s}
+/* ── Page header ─────────────────────────────── */
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; }
+.page-title { font-size: 24px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+.page-sub { font-size: 14px; color: var(--grey); }
 
-/* Forms */
-.form-group{margin-bottom:18px}
-.form-label{display:block;font-size:13px;font-weight:bold;color:#1F3864;margin-bottom:6px}
-.form-control{width:100%;padding:9px 12px;border:1px solid #C8D8E8;border-radius:4px;font-size:14px;font-family:Arial}
-.form-control:focus{outline:none;border-color:#2E75B6;box-shadow:0 0 0 3px rgba(46,117,182,0.15)}
-select.form-control{cursor:pointer}
-.form-hint{font-size:12px;color:#595959;margin-top:4px}
+/* ── Cards ───────────────────────────────────── */
+.card {
+  background: white; border-radius: 10px; padding: 24px;
+  margin-bottom: 20px; box-shadow: var(--shadow);
+  border: 1px solid rgba(220,230,241,0.6);
+}
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.card-title { font-size: 15px; font-weight: 600; color: var(--navy); }
 
-/* Stats row */
-.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px}
-.stat-card{background:#fff;border-radius:6px;padding:18px 20px;border-left:4px solid #2E75B6;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
-.stat-num{font-size:28px;font-weight:bold;color:#1F3864}
-.stat-lbl{font-size:12px;color:#595959;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px}
+/* ── Stats ───────────────────────────────────── */
+.stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card {
+  background: white; border-radius: 10px; padding: 20px;
+  border-left: 4px solid var(--blue); box-shadow: var(--shadow);
+}
+.stat-num { font-size: 32px; font-weight: 700; color: var(--navy); line-height: 1; }
+.stat-lbl { font-size: 11px; font-weight: 600; color: var(--grey); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.6px; }
 
-.page-title{font-size:22px;font-weight:bold;color:#1F3864;margin-bottom:6px}
-.page-sub{font-size:14px;color:#595959;margin-bottom:24px}
-.actions-row{display:flex;gap:10px;flex-wrap:wrap}
-.section-label{font-size:11px;font-weight:bold;color:#595959;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+/* ── Buttons ─────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 18px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  cursor: pointer; border: none; transition: all 0.15s; line-height: 1;
+  font-family: inherit; text-decoration: none;
+}
+.btn:hover { opacity: 0.88; text-decoration: none; }
+.btn-primary { background: var(--blue); color: white; box-shadow: 0 2px 6px rgba(46,117,182,0.3); }
+.btn-navy { background: var(--navy); color: white; }
+.btn-green { background: var(--green); color: white; }
+.btn-red { background: var(--red); color: white; }
+.btn-outline { background: transparent; color: var(--blue); border: 1.5px solid var(--blue); }
+.btn-ghost { background: var(--pale); color: var(--navy); border: 1.5px solid var(--light); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-icon { padding: 8px; width: 34px; height: 34px; justify-content: center; }
 
-/* Alert */
-.alert{padding:12px 16px;border-radius:4px;margin-bottom:16px;font-size:13px}
-.alert-success{background:#D4EDDA;color:#155724;border:1px solid #C3E6CB}
-.alert-error{background:#F8D7DA;color:#721C24;border:1px solid #F5C6CB}
+/* ── Tables ──────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  background: var(--navy); color: rgba(255,255,255,0.9);
+  padding: 11px 14px; text-align: left; font-size: 11px;
+  font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase;
+}
+.data-table th:first-child { border-radius: 6px 0 0 0; }
+.data-table th:last-child { border-radius: 0 6px 0 0; }
+.data-table td { padding: 12px 14px; border-bottom: 1px solid #EEF3F9; font-size: 13px; }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: #F7FAFE; }
+.data-table td:first-child { font-weight: 500; }
+
+/* ── Badges ──────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 20px; font-size: 11px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge-draft { background: #F0F0F0; color: #888; }
+.badge-active { background: #D4EDDA; color: #1A6B36; }
+.badge-closed { background: #FDECEA; color: #A94442; }
+.badge-complete { background: #D4EDDA; color: #1A6B36; }
+.badge-pending { background: #FFF8E1; color: #856404; }
+.badge-self { background: var(--light); color: var(--navy); }
+.badge-supervisor { background: #FDECEA; color: var(--red); }
+.badge-peer { background: #E8F5E9; color: var(--green); }
+.badge-direct_report { background: #FFF3E0; color: var(--amber); }
+.badge-skip_level { background: #EEF3F9; color: #4A6A8A; }
+
+/* ── Progress ────────────────────────────────── */
+.progress-wrap { display: flex; align-items: center; gap: 10px; }
+.progress-bar { height: 6px; background: var(--lgrey); border-radius: 3px; overflow: hidden; width: 80px; flex-shrink: 0; }
+.progress-fill { height: 100%; background: var(--blue); border-radius: 3px; transition: width 0.3s; }
+.progress-label { font-size: 12px; color: var(--grey); white-space: nowrap; }
+
+/* ── Forms ───────────────────────────────────── */
+.form-section { margin-bottom: 28px; }
+.form-section-title { font-size: 13px; font-weight: 600; color: var(--navy); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--light); }
+.form-group { margin-bottom: 18px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-row-3 { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+.form-label { display: block; font-size: 12px; font-weight: 600; color: var(--navy); margin-bottom: 6px; letter-spacing: 0.2px; }
+.form-control {
+  width: 100%; padding: 9px 12px; border: 1.5px solid var(--light);
+  border-radius: 6px; font-size: 14px; font-family: inherit; color: #1a2030;
+  background: white; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.form-control:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(46,117,182,0.12); }
+select.form-control { cursor: pointer; }
+.form-hint { font-size: 11px; color: var(--grey); margin-top: 5px; }
+
+/* ── Rater rows ──────────────────────────────── */
+.rater-rows { display: flex; flex-direction: column; gap: 10px; }
+.rater-row {
+  display: grid; grid-template-columns: 1fr 1fr 180px 40px;
+  gap: 10px; align-items: end;
+  background: var(--pale); border-radius: 8px; padding: 12px 14px;
+  border: 1.5px solid var(--light);
+}
+.rater-row-header { display: grid; grid-template-columns: 1fr 1fr 180px 40px; gap: 10px; padding: 0 14px; }
+.rater-row-header span { font-size: 11px; font-weight: 600; color: var(--grey); text-transform: uppercase; letter-spacing: 0.5px; }
+.remove-rater-btn {
+  width: 32px; height: 32px; border-radius: 6px; border: 1.5px solid #FDECEA;
+  background: #FDECEA; color: var(--red); cursor: pointer;
+  font-size: 16px; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s; font-family: inherit;
+}
+.remove-rater-btn:hover { background: var(--red); color: white; }
+.add-rater-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px; border: 1.5px dashed var(--blue); border-radius: 6px;
+  color: var(--blue); background: transparent; cursor: pointer; font-size: 13px;
+  font-weight: 600; font-family: inherit; margin-top: 4px; transition: all 0.15s;
+}
+.add-rater-btn:hover { background: var(--pale); }
+
+/* ── Action rows ─────────────────────────────── */
+.actions-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+/* ── Empty state ─────────────────────────────── */
+.empty-state { text-align: center; padding: 48px 24px; color: var(--grey); }
+.empty-state-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
+.empty-state-text { font-size: 14px; margin-bottom: 16px; }
+
+/* ── Status actions ──────────────────────────── */
+.status-bar {
+  background: white; border-radius: 10px; padding: 16px 20px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  box-shadow: var(--shadow); margin-bottom: 20px;
+  border: 1px solid rgba(220,230,241,0.6);
+}
+.status-bar-label { font-size: 12px; font-weight: 600; color: var(--grey); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* ── Alert ───────────────────────────────────── */
+.alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; border-left: 4px solid; }
+.alert-success { background: #F0FBF4; color: #1A6B36; border-color: var(--green); }
+.alert-error { background: #FEF2F2; color: var(--red); border-color: var(--red); }
+
+/* ── Responsive ──────────────────────────────── */
+@media (max-width: 700px) {
+  .admin-main { padding: 16px 12px; }
+  .form-row, .form-row-3 { grid-template-columns: 1fr; }
+  .rater-row { grid-template-columns: 1fr; }
+  .rater-row-header { display: none; }
+  .data-table { font-size: 12px; }
+  .data-table td, .data-table th { padding: 8px 10px; }
+}
 </style>`;
 
 function adminShell(title, content) {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>${title} — SH360 Admin</title>${CSS}</head><body>
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>${title} — SH360</title>${CSS}</head><body>
   <nav class="admin-nav">
-    <span class="nav-brand">SH360</span>
-    <a href="/admin" class="nav-link">Dashboard</a>
+    <div class="nav-logo">
+      <div class="nav-logo-mark">360</div>
+      <span class="nav-brand">SH360</span>
+    </div>
+    <a href="/admin" class="nav-link">Surveys</a>
     <div class="nav-spacer"></div>
-    <a href="/admin/logout" class="nav-link">Log out</a>
+    <div class="nav-user">
+      <div class="nav-avatar">A</div>
+      <a href="/admin/logout" class="nav-link">Sign out</a>
+    </div>
   </nav>
   <div class="admin-main">${content}</div></body></html>`;
 }
 
 function loginPage(error) {
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>SH360 Admin Login</title>${CSS}
-  <style>.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center}
-  .login-card{background:#fff;border-radius:8px;padding:48px;width:380px;box-shadow:0 4px 24px rgba(0,0,0,0.1);border-top:4px solid #1F3864}
-  .login-title{font-size:22px;font-weight:bold;color:#1F3864;margin-bottom:4px}
-  .login-sub{font-size:13px;color:#595959;margin-bottom:28px}</style></head>
-  <body><div class="login-wrap"><div class="login-card">
-  <div class="login-title">SH360 Admin</div>
-  <div class="login-sub">Sekisui House US · 360 Leadership Survey Platform</div>
-  ${error ? '<div class="alert alert-error">Incorrect password. Please try again.</div>' : ''}
-  <form method="POST" action="/admin/login">
-    <div class="form-group"><label class="form-label">Password</label>
-    <input class="form-control" type="password" name="password" autofocus required placeholder="Enter admin password"/></div>
-    <button class="btn btn-navy" style="width:100%" type="submit">Sign In</button>
-  </form></div></div></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sign In — SH360</title>${CSS}
+  <style>
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: linear-gradient(135deg, #1F3864 0%, #2E75B6 100%); }
+  .login-card { background: white; border-radius: 16px; padding: 48px; width: 100%; max-width: 420px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+  .login-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+  .login-logo-mark { width: 44px; height: 44px; background: var(--navy); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; color: white; font-size: 16px; }
+  .login-logo-text { }
+  .login-logo-name { font-size: 20px; font-weight: 700; color: var(--navy); line-height: 1; }
+  .login-logo-sub { font-size: 12px; color: var(--grey); margin-top: 2px; }
+  .login-title { font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+  .login-sub { font-size: 14px; color: var(--grey); margin-bottom: 28px; }
+  .login-btn { width: 100%; padding: 12px; background: var(--navy); color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+  .login-btn:hover { background: var(--blue); }
+  .login-footer { text-align: center; margin-top: 24px; font-size: 12px; color: var(--grey); }
+  </style></head>
+  <body>
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-mark">360</div>
+      <div class="login-logo-text">
+        <div class="login-logo-name">SH360</div>
+        <div class="login-logo-sub">Sekisui House US</div>
+      </div>
+    </div>
+    <div class="login-title">Welcome back</div>
+    <div class="login-sub">Sign in to the survey administration panel.</div>
+    ${error ? '<div class="alert alert-error">Incorrect password. Please try again.</div>' : ''}
+    <form method="POST" action="/admin/login">
+      <div class="form-group">
+        <label class="form-label">Admin Password</label>
+        <input class="form-control" type="password" name="password" autofocus required placeholder="Enter your password" style="font-size:15px;padding:12px 14px"/>
+      </div>
+      <button class="login-btn" type="submit">Sign In</button>
+    </form>
+    <div class="login-footer">360 Leadership Survey Platform</div>
+  </div>
+  </body></html>`;
 }
 
 function dashboardPage(cycles) {
-  const activeCount = cycles.filter(c=>c.status==='active').length;
-  const totalLeaders = cycles.reduce((sum,c)=>sum+(c.leaders?.[0]?.count||0),0);
+  const activeCount = cycles.filter(c => c.status === 'active').length;
+  const draftCount  = cycles.filter(c => c.status === 'draft').length;
 
-  const cycleRows = cycles.map(c=>`
+  const rows = cycles.length ? cycles.map(c => `
     <tr>
-      <td><a href="/admin/cycles/${c.id}">${c.name}</a></td>
-      <td>${c.description||'—'}</td>
+      <td><a href="/admin/cycles/${c.id}" style="font-weight:600">${c.name}</a></td>
+      <td>${c.description || '<span style="color:#bbb">—</span>'}</td>
       <td><span class="badge badge-${c.status}">${c.status}</span></td>
-      <td>${c.opens_at ? new Date(c.opens_at).toLocaleDateString() : '—'}</td>
-      <td>${c.closes_at ? new Date(c.closes_at).toLocaleDateString() : '—'}</td>
-      <td><a href="/admin/cycles/${c.id}" class="btn btn-outline btn-sm">Manage</a></td>
-    </tr>`).join('');
+      <td>${c.opens_at ? new Date(c.opens_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '<span style="color:#bbb">—</span>'}</td>
+      <td>${c.closes_at ? new Date(c.closes_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '<span style="color:#bbb">—</span>'}</td>
+      <td><a href="/admin/cycles/${c.id}" class="btn btn-outline btn-sm">Open</a></td>
+    </tr>`).join('') : '';
 
   return adminShell('Dashboard', `
-    <div class="page-title">Dashboard</div>
-    <div class="page-sub">Manage survey cycles, leaders, and raters.</div>
-    <div class="stats-row">
-      <div class="stat-card"><div class="stat-num">${cycles.length}</div><div class="stat-lbl">Total Cycles</div></div>
-      <div class="stat-card"><div class="stat-num">${activeCount}</div><div class="stat-lbl">Active Cycles</div></div>
+    <div class="page-header">
+      <div>
+        <div class="page-title">Surveys</div>
+        <div class="page-sub">Manage your 360 survey cycles, leaders, and raters.</div>
+      </div>
+      <a href="/admin/cycles/new" class="btn btn-primary">+ New Survey</a>
     </div>
+
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-num">${cycles.length}</div><div class="stat-lbl">Total Surveys</div></div>
+      <div class="stat-card" style="border-color:var(--green)"><div class="stat-num" style="color:var(--green)">${activeCount}</div><div class="stat-lbl">Active</div></div>
+      <div class="stat-card" style="border-color:var(--grey)"><div class="stat-num" style="color:var(--grey)">${draftCount}</div><div class="stat-lbl">Drafts</div></div>
+    </div>
+
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Survey Cycles</span>
-        <a href="/admin/cycles/new" class="btn btn-primary">+ New Cycle</a>
+        <span class="card-title">All Surveys</span>
+        <a href="/admin/cycles/new" class="btn btn-ghost btn-sm">+ New Survey</a>
       </div>
-      ${cycles.length ? `<table class="data-table">
-        <thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Opens</th><th>Closes</th><th></th></tr></thead>
-        <tbody>${cycleRows}</tbody></table>` : '<p style="color:#595959;font-size:13px">No cycles yet. Create your first one.</p>'}
+      ${cycles.length ? `
+      <table class="data-table">
+        <thead><tr><th>Survey Name</th><th>Description</th><th>Status</th><th>Opens</th><th>Closes</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : `
+      <div class="empty-state">
+        <div class="empty-state-icon">📋</div>
+        <div class="empty-state-text">No surveys yet. Create your first one to get started.</div>
+        <a href="/admin/cycles/new" class="btn btn-primary">Create Survey</a>
+      </div>`}
     </div>`);
 }
 
 function cycleFormPage() {
-  return adminShell('New Cycle', `
-    <div class="page-title">New Survey Cycle</div>
-    <div class="page-sub">A cycle groups a set of leaders being assessed at the same time (e.g. "2026 Mid-Year").</div>
-    <div class="card" style="max-width:560px">
+  return adminShell('New Survey', `
+    <div class="page-header">
+      <div>
+        <div class="page-title">New Survey</div>
+        <div class="page-sub">A survey groups the leaders being assessed in the same round.</div>
+      </div>
+    </div>
+    <div class="card" style="max-width:580px">
       <form method="POST" action="/admin/cycles">
-        <div class="form-group"><label class="form-label">Cycle Name *</label>
-          <input class="form-control" name="name" required placeholder="e.g. 2026 Mid-Year 360"/></div>
-        <div class="form-group"><label class="form-label">Description</label>
-          <input class="form-control" name="description" placeholder="Optional notes"/></div>
-        <div class="form-group"><label class="form-label">Opens At</label>
-          <input class="form-control" type="datetime-local" name="opens_at"/>
-          <div class="form-hint">Leave blank to open manually.</div></div>
-        <div class="form-group"><label class="form-label">Closes At</label>
-          <input class="form-control" type="datetime-local" name="closes_at"/>
-          <div class="form-hint">Leave blank to close manually.</div></div>
+        <div class="form-group">
+          <label class="form-label">Survey Name *</label>
+          <input class="form-control" name="name" required placeholder="e.g. 2026 Mid-Year Leadership Review"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <input class="form-control" name="description" placeholder="Optional notes about this survey round"/>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Opens At</label>
+            <input class="form-control" type="datetime-local" name="opens_at"/>
+            <div class="form-hint">Leave blank to open manually.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Closes At</label>
+            <input class="form-control" type="datetime-local" name="closes_at"/>
+            <div class="form-hint">Leave blank to close manually.</div>
+          </div>
+        </div>
         <div class="actions-row">
-          <button class="btn btn-primary" type="submit">Create Cycle</button>
-          <a href="/admin" class="btn btn-outline">Cancel</a>
+          <button class="btn btn-primary" type="submit">Create Survey</button>
+          <a href="/admin" class="btn btn-ghost">Cancel</a>
         </div>
       </form>
     </div>`);
 }
 
 function cycleDetailPage(cycle, leaders) {
-  const statusActions = {
-    draft:  [['active','Activate Cycle'],['closed','Close Cycle']],
-    active: [['closed','Close Cycle'],['draft','Return to Draft']],
-    closed: [['active','Re-activate'],['draft','Return to Draft']]
+  const statusOptions = {
+    draft:  [['active','Activate Survey'],['closed','Close Survey']],
+    active: [['closed','Close Survey'],['draft','Back to Draft']],
+    closed: [['active','Re-open'],['draft','Back to Draft']]
   }[cycle.status] || [];
 
-  const leaderRows = leaders.map(l => {
+  const rows = leaders.map(l => {
     const total     = l.raters?.length || 0;
-    const completed = l.raters?.filter(r=>r.completed_at).length || 0;
-    const pct       = total ? Math.round(completed/total*100) : 0;
+    const completed = l.raters?.filter(r => r.completed_at).length || 0;
+    const pct       = total ? Math.round(completed / total * 100) : 0;
     return `<tr>
       <td><a href="/admin/leaders/${l.id}">${l.name}</a></td>
-      <td>${l.title||'—'}</td>
-      <td>${l.department||'—'}</td>
+      <td style="color:var(--grey)">${l.title || '—'}</td>
+      <td style="color:var(--grey)">${l.department || '—'}</td>
       <td>${total}</td>
       <td>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="progress-bar" style="width:80px"><div class="progress-fill" style="width:${pct}%"></div></div>
-          <span>${completed}/${total}</span>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <span class="progress-label">${completed}/${total}</span>
         </div>
       </td>
       <td>
         <div class="actions-row">
-          <a href="/admin/leaders/${l.id}" class="btn btn-outline btn-sm">Manage</a>
+          <a href="/admin/leaders/${l.id}" class="btn btn-ghost btn-sm">Manage</a>
           <form method="POST" action="/admin/leaders/${l.id}/send-invites" style="display:inline">
             <button class="btn btn-green btn-sm" type="submit">Send Invites</button>
           </form>
@@ -382,44 +584,75 @@ function cycleDetailPage(cycle, leaders) {
   }).join('');
 
   return adminShell(cycle.name, `
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+    <div class="page-header">
       <div>
         <div class="page-title">${cycle.name}</div>
-        <div class="page-sub"><span class="badge badge-${cycle.status}">${cycle.status}</span>${cycle.description ? ' · ' + cycle.description : ''}</div>
+        <div class="page-sub">
+          <span class="badge badge-${cycle.status}">${cycle.status}</span>
+          ${cycle.description ? ' &nbsp;' + cycle.description : ''}
+        </div>
       </div>
       <div class="actions-row">
-        ${statusActions.map(([s,l])=>`<form method="POST" action="/admin/cycles/${cycle.id}/status" style="display:inline">
-          <input type="hidden" name="status" value="${s}"/>
-          <button class="btn ${s==='active'?'btn-green':s==='closed'?'btn-red':'btn-outline'}" type="submit">${l}</button>
-        </form>`).join('')}
+        ${statusOptions.map(([s,l]) => `
+          <form method="POST" action="/admin/cycles/${cycle.id}/status" style="display:inline">
+            <input type="hidden" name="status" value="${s}"/>
+            <button class="btn ${s==='active'?'btn-green':s==='closed'?'btn-red':'btn-ghost'}" type="submit">${l}</button>
+          </form>`).join('')}
         <a href="/admin/cycles/${cycle.id}/leaders/new" class="btn btn-primary">+ Add Leader</a>
       </div>
     </div>
+
     <div class="card">
-      <div class="card-header"><span class="card-title">Leaders in this Cycle (${leaders.length})</span></div>
-      ${leaders.length ? `<table class="data-table">
-        <thead><tr><th>Leader</th><th>Title</th><th>Department</th><th>Raters</th><th>Completion</th><th></th></tr></thead>
-        <tbody>${leaderRows}</tbody></table>` : `<p style="color:#595959;font-size:13px">No leaders yet. <a href="/admin/cycles/${cycle.id}/leaders/new">Add the first leader.</a></p>`}
+      <div class="card-header">
+        <span class="card-title">Leaders in this Survey</span>
+        <span style="font-size:13px;color:var(--grey)">${leaders.length} leader${leaders.length !== 1 ? 's' : ''}</span>
+      </div>
+      ${leaders.length ? `
+      <table class="data-table">
+        <thead><tr><th>Leader</th><th>Title</th><th>Department</th><th>Raters</th><th>Responses</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : `
+      <div class="empty-state">
+        <div class="empty-state-icon">👤</div>
+        <div class="empty-state-text">No leaders added yet.</div>
+        <a href="/admin/cycles/${cycle.id}/leaders/new" class="btn btn-primary">Add First Leader</a>
+      </div>`}
     </div>`);
 }
 
 function leaderFormPage(cycleId) {
   return adminShell('Add Leader', `
-    <div class="page-title">Add Leader</div>
-    <div class="page-sub">The leader being assessed in this cycle. A self-rater link will be created automatically.</div>
-    <div class="card" style="max-width:560px">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Add Leader</div>
+        <div class="page-sub">The leader being assessed. A self-assessment link is created automatically.</div>
+      </div>
+    </div>
+    <div class="card" style="max-width:580px">
       <form method="POST" action="/admin/cycles/${cycleId}/leaders">
-        <div class="form-group"><label class="form-label">Full Name *</label>
-          <input class="form-control" name="name" required placeholder="e.g. Chris Cady"/></div>
-        <div class="form-group"><label class="form-label">Title</label>
-          <input class="form-control" name="title" placeholder="e.g. Division President"/></div>
-        <div class="form-group"><label class="form-label">Email *</label>
-          <input class="form-control" type="email" name="email" required placeholder="leader@sekisuihouse.com"/></div>
-        <div class="form-group"><label class="form-label">Department</label>
-          <input class="form-control" name="department" placeholder="e.g. SHAWOOD Division"/></div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Full Name *</label>
+            <input class="form-control" name="name" required placeholder="Chris Cady"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Title</label>
+            <input class="form-control" name="title" placeholder="Division President"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Email *</label>
+            <input class="form-control" type="email" name="email" required placeholder="leader@company.com"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Department</label>
+            <input class="form-control" name="department" placeholder="e.g. SHAWOOD Division"/>
+          </div>
+        </div>
         <div class="actions-row">
           <button class="btn btn-primary" type="submit">Add Leader</button>
-          <a href="/admin/cycles/${cycleId}" class="btn btn-outline">Cancel</a>
+          <a href="/admin/cycles/${cycleId}" class="btn btn-ghost">Cancel</a>
         </div>
       </form>
     </div>`);
@@ -428,82 +661,140 @@ function leaderFormPage(cycleId) {
 function raterFormPage(leader) {
   if (!leader) return adminShell('Error', '<p>Leader not found.</p>');
   return adminShell('Add Raters', `
-    <div class="page-title">Add Raters — ${leader.name}</div>
-    <div class="page-sub">Add multiple raters at once. Each line: Name, Email, Group</div>
-    <div class="card" style="max-width:640px">
-      <form method="POST" action="/admin/leaders/${leader.id}/raters">
-        <div class="form-group">
-          <label class="form-label">Raters (one per line)</label>
-          <textarea class="form-control" name="raters_text" rows="10"
-            placeholder="Jane Smith, jane@sekisuihouse.com, supervisor
-Tom Jones, tom@sekisuihouse.com, peer
-Maria Garcia, maria@sekisuihouse.com, direct_report
-Alex Chen, alex@sekisuihouse.com, skip_level"></textarea>
-          <div class="form-hint">
-            Valid groups: <code>supervisor</code> · <code>peer</code> · <code>direct_report</code> · <code>skip_level</code><br/>
-            The leader's self-assessment link was created automatically when you added them.
+    <div class="page-header">
+      <div>
+        <div class="page-title">Add Raters</div>
+        <div class="page-sub">Adding raters for <strong>${leader.name}</strong>. Each rater receives a unique, anonymous survey link.</div>
+      </div>
+    </div>
+    <div class="card">
+      <form method="POST" action="/admin/leaders/${leader.id}/raters" id="rater-form">
+        <div class="form-section">
+          <div class="form-section-title">Rater Information</div>
+          <div class="rater-row-header">
+            <span>Full Name</span><span>Email Address</span><span>Relationship to Leader</span><span></span>
           </div>
+          <div class="rater-rows" id="rater-rows">
+            ${[1,2,3].map(() => raterRow()).join('')}
+          </div>
+          <button type="button" class="add-rater-btn" onclick="addRaterRow()">
+            <span style="font-size:18px;line-height:1">+</span> Add Another Rater
+          </button>
         </div>
-        <div class="actions-row">
-          <button class="btn btn-primary" type="submit">Add Raters</button>
-          <a href="/admin/leaders/${leader.id}" class="btn btn-outline">Cancel</a>
+        <div class="actions-row" style="margin-top:8px">
+          <button class="btn btn-primary" type="submit">Save Raters</button>
+          <a href="/admin/leaders/${leader.id}" class="btn btn-ghost">Cancel</a>
         </div>
       </form>
-    </div>`);
+    </div>
+    <script>
+    function raterRow() {
+      const div = document.createElement('div');
+      div.className = 'rater-row';
+      div.innerHTML = \`
+        <div><input class="form-control" type="text" name="name" placeholder="Full name"/></div>
+        <div><input class="form-control" type="email" name="email" placeholder="email@company.com"/></div>
+        <div>
+          <select class="form-control" name="rater_group">
+            <option value="">Select relationship...</option>
+            <option value="supervisor">Supervisor</option>
+            <option value="peer">Peer</option>
+            <option value="direct_report">Direct Report</option>
+            <option value="skip_level">Skip-Level</option>
+          </select>
+        </div>
+        <button type="button" class="remove-rater-btn" onclick="this.closest('.rater-row').remove()">x</button>
+      \`;
+      return div;
+    }
+    function addRaterRow() {
+      document.getElementById('rater-rows').appendChild(raterRow());
+    }
+    </script>`);
+}
+
+function raterRow() {
+  return `<div class="rater-row">
+    <div><input class="form-control" type="text" name="name" placeholder="Full name"/></div>
+    <div><input class="form-control" type="email" name="email" placeholder="email@company.com"/></div>
+    <div>
+      <select class="form-control" name="rater_group">
+        <option value="">Select relationship...</option>
+        <option value="supervisor">Supervisor</option>
+        <option value="peer">Peer</option>
+        <option value="direct_report">Direct Report</option>
+        <option value="skip_level">Skip-Level</option>
+      </select>
+    </div>
+    <button type="button" class="remove-rater-btn" onclick="this.closest('.rater-row').remove()">&#215;</button>
+  </div>`;
 }
 
 function leaderDetailPage(leader, raters, report, completedCount, totalCount) {
   if (!leader) return adminShell('Error', '<p>Leader not found.</p>');
-  const pct = totalCount ? Math.round(completedCount/totalCount*100) : 0;
+  const pct = totalCount ? Math.round(completedCount / totalCount * 100) : 0;
 
   const groupOrder = ['self','supervisor','peer','direct_report','skip_level'];
-  const sorted = [...raters].sort((a,b)=>groupOrder.indexOf(a.rater_group)-groupOrder.indexOf(b.rater_group));
+  const sorted = [...raters].sort((a,b) => groupOrder.indexOf(a.rater_group) - groupOrder.indexOf(b.rater_group));
 
-  const raterRows = sorted.map(r=>`<tr>
+  const rows = sorted.map(r => `<tr>
     <td>${r.name}</td>
     <td>${r.email}</td>
-    <td><span class="badge badge-${r.rater_group==='self'?'draft':'pending'}">${r.rater_group.replace('_',' ')}</span></td>
-    <td>${r.email_sent_at ? '✓ Sent ' + new Date(r.email_sent_at).toLocaleDateString() : '—'}</td>
-    <td><span class="badge ${r.completed_at?'badge-complete':'badge-pending'}">${r.completed_at?'Complete':'Pending'}</span></td>
+    <td><span class="badge badge-${r.rater_group}">${r.rater_group.replace(/_/g,' ')}</span></td>
+    <td>${r.email_sent_at ? '<span style="color:var(--green)">&#10003; Sent ' + new Date(r.email_sent_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) + '</span>' : '<span style="color:#bbb">Not sent</span>'}</td>
+    <td><span class="badge ${r.completed_at ? 'badge-complete' : 'badge-pending'}">${r.completed_at ? 'Complete' : 'Pending'}</span></td>
     <td>
       <div class="actions-row">
-        <a href="${process.env.APP_URL||''}/survey/${r.token}" target="_blank" class="btn btn-outline btn-sm">Open Link</a>
-        ${!r.completed_at?`<form method="POST" action="/admin/raters/${r.id}/delete" style="display:inline" onsubmit="return confirm('Remove this rater?')">
-          <button class="btn btn-red btn-sm">Remove</button></form>`:''}
+        <a href="${process.env.APP_URL || ''}/survey/${r.token}" target="_blank" class="btn btn-ghost btn-sm">Open Link</a>
+        ${!r.completed_at ? `<form method="POST" action="/admin/raters/${r.id}/delete" style="display:inline" onsubmit="return confirm('Remove this rater?')">
+          <button class="btn btn-red btn-sm">Remove</button></form>` : ''}
       </div>
     </td>
   </tr>`).join('');
 
   return adminShell(leader.name, `
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+    <div class="page-header">
       <div>
         <div class="page-title">${leader.name}</div>
-        <div class="page-sub">${leader.title||''} ${leader.department?'· '+leader.department:''}</div>
+        <div class="page-sub">${leader.title || ''}${leader.department ? ' &nbsp;·&nbsp; ' + leader.department : ''}</div>
       </div>
       <div class="actions-row">
         <a href="/admin/leaders/${leader.id}/raters/new" class="btn btn-primary">+ Add Raters</a>
         <form method="POST" action="/admin/leaders/${leader.id}/send-invites">
           <button class="btn btn-green" type="submit">Send Pending Invites</button>
         </form>
-        ${completedCount>=3?`<form method="POST" action="/admin/leaders/${leader.id}/generate-report">
+        ${completedCount >= 3 ? `
+        <form method="POST" action="/admin/leaders/${leader.id}/generate-report">
           <button class="btn btn-navy" type="submit">Generate AI Report</button>
-        </form>`:'<span style="font-size:12px;color:#595959;align-self:center">Need 3+ responses to generate report</span>'}
-        ${report?`<a href="/report/view/${report.id}" class="btn btn-outline" target="_blank">View Report</a>`:''}
+        </form>` : `<span style="font-size:12px;color:var(--grey);align-self:center">Need 3+ responses to generate report</span>`}
+        ${report ? `<a href="/report/view/${report.id}" class="btn btn-outline" target="_blank">View Report</a>` : ''}
       </div>
     </div>
 
     <div class="stats-row">
       <div class="stat-card"><div class="stat-num">${totalCount}</div><div class="stat-lbl">Total Raters</div></div>
-      <div class="stat-card"><div class="stat-num">${completedCount}</div><div class="stat-lbl">Completed</div></div>
-      <div class="stat-card"><div class="stat-num">${pct}%</div><div class="stat-lbl">Response Rate</div></div>
-      ${report?`<div class="stat-card"><div class="stat-num" style="font-size:14px;padding-top:4px">✓</div><div class="stat-lbl">Report Generated</div></div>`:''}
+      <div class="stat-card" style="border-color:var(--green)"><div class="stat-num" style="color:var(--green)">${completedCount}</div><div class="stat-lbl">Completed</div></div>
+      <div class="stat-card" style="border-color:var(--amber)"><div class="stat-num" style="color:var(--amber)">${pct}%</div><div class="stat-lbl">Response Rate</div></div>
     </div>
 
     <div class="card">
-      <div class="card-header"><span class="card-title">Raters</span></div>
-      ${raters.length?`<table class="data-table">
-        <thead><tr><th>Name</th><th>Email</th><th>Group</th><th>Invite</th><th>Status</th><th></th></tr></thead>
-        <tbody>${raterRows}</tbody></table>`:`<p style="color:#595959;font-size:13px">No raters added yet. <a href="/admin/leaders/${leader.id}/raters/new">Add raters.</a></p>`}
+      <div class="card-header">
+        <span class="card-title">Raters</span>
+        <div class="progress-wrap">
+          <div class="progress-bar" style="width:120px"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <span class="progress-label">${completedCount} of ${totalCount} complete</span>
+        </div>
+      </div>
+      ${raters.length ? `
+      <table class="data-table">
+        <thead><tr><th>Name</th><th>Email</th><th>Relationship</th><th>Invite</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : `
+      <div class="empty-state">
+        <div class="empty-state-icon">&#128101;</div>
+        <div class="empty-state-text">No raters added yet.</div>
+        <a href="/admin/leaders/${leader.id}/raters/new" class="btn btn-primary">Add Raters</a>
+      </div>`}
     </div>`);
 }
 
